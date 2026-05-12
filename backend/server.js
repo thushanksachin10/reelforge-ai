@@ -6,7 +6,9 @@ import authRoutes from './routes/authRoutes.js'
 import scriptRoutes from './routes/scriptRoutes.js'
 import folderRoutes from './routes/folderRoutes.js'
 
-dotenv.config()
+if (process.env.NODE_ENV !== 'production') {
+  dotenv.config()
+}
 
 const app = express()
 
