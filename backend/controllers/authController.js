@@ -46,8 +46,9 @@ export const signup = async (req, res) => {
       }
     })
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message })
-  }
+  console.error('SIGNUP ERROR:', error.message)
+  res.status(500).json({ message: 'Server error', error: error.message })
+}
 }
 
 // POST /api/auth/login
@@ -81,8 +82,9 @@ export const login = async (req, res) => {
       }
     })
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message })
-  }
+  console.error('LOGIN ERROR:', error.message)
+  res.status(500).json({ message: 'Server error', error: error.message })
+}
 }
 
 // GET /api/auth/me
