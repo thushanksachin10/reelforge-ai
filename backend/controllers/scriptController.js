@@ -1,14 +1,12 @@
 import Script from '../models/Script.js'
 import {
-  generateTitle,
-  generateHook,
-  generateScript,
-  generateScenes,
-  generateCTA,
-  generateHashtags,
-  generateViralScore,
-  generateThumbnailPrompt
+  generateHooksAndTitle,
+  generateScriptAndScenes,
+  generateHashtagsAndThumbnail,
 } from '../services/geminiService.js'
+
+// Small delay to space out grouped API requests
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 // POST /api/scripts/generate
 export const generateContent = async (req, res) => {
@@ -16,21 +14,21 @@ export const generateContent = async (req, res) => {
     const { topic, niche, platform, style } = req.body
 
     if (!topic || !niche || !platform || !style) {
-      return res.status(400).json({ message: 'All fields are required: topic, niche, platform, style' })
+      return res.status(400).json({
+        message: 'All fields are required: topic, niche, platform, style'
+      })
     }
 
-    // Run all Gemini prompts — each is a separate focused call
-    const [title, hook, script, scenes, cta, hashtags, viralScore, thumbnailPrompt] =
-      await Promise.all([
-        generateTitle(topic, niche, platform, style),
-        generateHook(topic, niche, platform, style),
-        generateScript(topic, niche, platform, style),
-        generateScenes(topic, niche, platform, style),
-        generateCTA(topic, niche, platform, style),
-        generateHashtags(topic, niche, platform, style),
-        generateViralScore(topic, niche, platform, style),
-        generateThumbnailPrompt(topic, niche, style)
-      ])
+    // 3 grouped AI requests instead of 8 separate ones
+    const [group1, group2, group3] = await Promise.all([
+      generateHooksAndTitle(topic, niche, platform, style),
+      generateScriptAndScenes(topic, niche, platform, style),
+      generateHashtagsAndThumbnail(topic, niche, platform, style),
+    ])
+
+    const { title, hook }                        = group1
+    const { script, scenes, cta, viralScore }    = group2
+    const { hashtags, thumbnailPrompt, thumbnailUrl }          = group3
 
     // Save to DB
     const saved = await Script.create({
@@ -46,16 +44,36 @@ export const generateContent = async (req, res) => {
       cta,
       hashtags,
       thumbnailPrompt,
-      viralScore
+      thumbnailUrl,
+      viralScore,
     })
 
     res.status(201).json({ message: 'Content generated successfully', script: saved })
+
   } catch (error) {
-    res.status(500).json({ message: 'Generation failed', error: error.message })
+    console.error('GENERATE ERROR:', error.message)
+
+    // Send helpful message to frontend based on error type
+    if (error.message.includes('429') || error.message.includes('rate limit')) {
+      return res.status(429).json({
+        message: 'AI is busy right now. Please wait 30 seconds and try again.'
+      })
+    }
+
+    if (error.message.includes('invalid JSON')) {
+      return res.status(500).json({
+        message: 'AI returned unexpected output. Please try again.'
+      })
+    }
+
+    res.status(500).json({
+      message: 'Generation failed. Please try again.',
+      error: error.message,
+    })
   }
 }
 
-// GET /api/scripts — get all scripts for logged-in user
+// GET /api/scripts
 export const getAllScripts = async (req, res) => {
   try {
     const scripts = await Script.find({ userId: req.user._id })
@@ -68,10 +86,13 @@ export const getAllScripts = async (req, res) => {
   }
 }
 
-// GET /api/scripts/:id — get single script
+// GET /api/scripts/:id
 export const getScriptById = async (req, res) => {
   try {
-    const script = await Script.findOne({ _id: req.params.id, userId: req.user._id })
+    const script = await Script.findOne({
+      _id: req.params.id,
+      userId: req.user._id
+    })
 
     if (!script) {
       return res.status(404).json({ message: 'Script not found' })
@@ -83,12 +104,16 @@ export const getScriptById = async (req, res) => {
   }
 }
 
-// PUT /api/scripts/:id — edit script
+// PUT /api/scripts/:id
 export const updateScript = async (req, res) => {
   try {
     const { title, hook, script, scenes, cta, hashtags, folderId } = req.body
 
-    const existing = await Script.findOne({ _id: req.params.id, userId: req.user._id })
+    const existing = await Script.findOne({
+      _id: req.params.id,
+      userId: req.user._id
+    })
+
     if (!existing) {
       return res.status(404).json({ message: 'Script not found' })
     }
@@ -105,29 +130,33 @@ export const updateScript = async (req, res) => {
   }
 }
 
-// POST /api/scripts/:id/duplicate — duplicate a script
+// POST /api/scripts/:id/duplicate
 export const duplicateScript = async (req, res) => {
   try {
-    const original = await Script.findOne({ _id: req.params.id, userId: req.user._id })
+    const original = await Script.findOne({
+      _id: req.params.id,
+      userId: req.user._id
+    })
+
     if (!original) {
       return res.status(404).json({ message: 'Script not found' })
     }
 
     const duplicate = await Script.create({
-      userId: req.user._id,
-      topic: original.topic,
-      niche: original.niche,
-      platform: original.platform,
-      style: original.style,
-      title: `${original.title} (Copy)`,
-      hook: original.hook,
-      script: original.script,
-      scenes: original.scenes,
-      cta: original.cta,
-      hashtags: original.hashtags,
+      userId:          req.user._id,
+      topic:           original.topic,
+      niche:           original.niche,
+      platform:        original.platform,
+      style:           original.style,
+      title:           `${original.title} (Copy)`,
+      hook:            original.hook,
+      script:          original.script,
+      scenes:          original.scenes,
+      cta:             original.cta,
+      hashtags:        original.hashtags,
       thumbnailPrompt: original.thumbnailPrompt,
-      viralScore: original.viralScore,
-      folderId: original.folderId
+      viralScore:      original.viralScore,
+      folderId:        original.folderId,
     })
 
     res.status(201).json({ message: 'Script duplicated', script: duplicate })
@@ -136,10 +165,14 @@ export const duplicateScript = async (req, res) => {
   }
 }
 
-// DELETE /api/scripts/:id — delete script
+// DELETE /api/scripts/:id
 export const deleteScript = async (req, res) => {
   try {
-    const script = await Script.findOne({ _id: req.params.id, userId: req.user._id })
+    const script = await Script.findOne({
+      _id: req.params.id,
+      userId: req.user._id
+    })
+
     if (!script) {
       return res.status(404).json({ message: 'Script not found' })
     }
